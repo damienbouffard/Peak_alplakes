@@ -26,3 +26,4 @@ output/
 # OS generated files
 *.log
 T_out.dat
+*.nc

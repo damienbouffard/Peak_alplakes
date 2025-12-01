@@ -27,3 +27,4 @@ output/
 *.log
 T_out.dat
 *.nc
+*.json

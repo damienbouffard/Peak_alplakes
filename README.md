@@ -1,8 +1,8 @@
-# Visualisation of 1D model output
+# Visualisation of 1D and 3D model output
 
 **Date:** 2025-12-01
 
-**Authors:** Damien Bouffard, Martin Schmid (edit authors as needed)
+**Authors:** Damien Bouffard, Martin Schmid 
 
 ## Overview
 

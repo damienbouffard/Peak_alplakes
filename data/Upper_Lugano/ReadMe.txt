@@ -1,0 +1,1 @@
+go to https://www.alplakes.eawag.ch/downloads to download dataset

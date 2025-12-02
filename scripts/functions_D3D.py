@@ -1,32 +1,9 @@
+from pyexpat import model
 import requests
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-
-#def generate_output_path(api_url, base_dir='../data/Joux'):
-#    from urllib.parse import urlparse
-#    
-#    parsed_url = urlparse(api_url)
-#    path_parts = parsed_url.path.strip('/').split('/')
-#    
-#    # Extract components
-#    lake_name = path_parts[3]
-#    timestamp = path_parts[4]
-#    model = path_parts[2]
-#    depth = path_parts[5]
-#
-#    
-#    # Map model names to abbreviations
-#    model_mapping = {
-#        'delft3d-flow': 'D3D',
-#        'delft3d': 'D3D',
-#        # Add more mappings as needed
-#    }
-#    
-#    model_abbrev = model_mapping.get(model, model.upper())
-#    
-#    return f'{base_dir}/{lake_name}_{timestamp}__{depth}m_{model_abbrev}.json'
 
 
 def generate_output_path(api_url, base_dir='../data'):
@@ -94,7 +71,13 @@ def generate_output_path(api_url, base_dir='../data'):
 #     variables=['temperature', 'velocity']
 # )
 
-def fetch_and_save_alplakes_data_map(api_url, verbose=True):
+
+
+    
+
+
+def fetch_and_save_alplakes_data_map(lake, date, depth, variables, model='delft3d-flow', verbose=True):
+
     """
     Fetch data from Alplakes API and save to JSON file.
     
@@ -110,6 +93,10 @@ def fetch_and_save_alplakes_data_map(api_url, verbose=True):
     dict or None
         The fetched data if successful, None otherwise
     """
+    # Construct API URL
+    variables_str = '&'.join([f'variables={var}' for var in variables])
+    api_url = (f"https://alplakes-api.eawag.ch/simulations/layer/{model}/{lake}/"f"{date}/{depth}?{variables_str}")
+    
     output_file = generate_output_path(api_url)
     
     if verbose:
@@ -163,145 +150,113 @@ def fetch_and_save_alplakes_data_map(api_url, verbose=True):
 # api_url = "https://alplakes-api.eawag.ch/simulations/layer/delft3d-flow/joux/202304050300/1?variables=temperature&variables=velocity"
 # data = fetch_and_save_alplakes_data(api_url)
 
-def plot_alplakes_temperature_velocity(data, grid_size=50, skip=5, figsize=(16, 12), 
-                                       save_path=None, dpi=300):
+
+def plot_alplakes_pcolormesh(data, skip=5, figsize=(14, 10), 
+                            plot_temp=True, plot_velocity=True, cmap='jet',
+                            quiver_scale=10, quiver_width=0.003):
     """
-    Create a temperature map with velocity arrows from Alplakes data.
+    Plot lake temperature and/or velocity currents
     
     Parameters:
     -----------
     data : dict
         The JSON data from Alplakes API
-    grid_size : int, optional
-        Resolution of the interpolation grid (default: 50)
     skip : int, optional
         Subsample velocity arrows - plot every nth point (default: 5)
     figsize : tuple, optional
-        Figure size in inches (default: (16, 12))
-    save_path : str, optional
-        Path to save the figure. If None, figure is not saved (default: None)
-    dpi : int, optional
-        Resolution for saved figure (default: 300)
+        Figure size in inches (default: (14, 10))
+    plot_temp : bool, optional
+        Whether to plot temperature (default: True)
+    plot_velocity : bool, optional
+        Whether to plot velocity arrows (default: True)
+    cmap : str, optional
+        Colormap for temperature (default: 'jet')
+        Other options: 'viridis', 'plasma', 'turbo', 'coolwarm', 'RdYlBu_r'
+    quiver_scale : float, optional
+        Scale for velocity arrows - larger values = smaller arrows (default: 10)
+        Try values between 5-50 depending on velocity magnitude
+    quiver_width : float, optional
+        Width of velocity arrows (default: 0.003)
     
     Returns:
     --------
     fig, ax : matplotlib figure and axes objects
     """
-    # Extract velocity data
-    u_velocity = np.array(data['variables']['u']['data'], dtype=float)
-    v_velocity = np.array(data['variables']['v']['data'], dtype=float)
-    
-    # Extract data arrays
     lat = np.array(data['lat'], dtype=float)
     lng = np.array(data['lng'], dtype=float)
-    temp = np.array(data['variables']['temperature']['data'], dtype=float)
-    depth = data['depth']['data']
-    time_str = data['time']
+    u = np.array(data['variables']['u']['data'], dtype=float)
+    v = np.array(data['variables']['v']['data'], dtype=float)
     
-    print(f"✓ Data loaded successfully!")
-    print(f"  Time: {time_str}")
-    print(f"  Depth: {depth:.2f} m")
-    print(f"  Grid shape: {temp.shape}")
-    print(f"  Temperature range: {np.nanmin(temp):.2f}°C to {np.nanmax(temp):.2f}°C")
-    
-    # Create the temperature map
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Flatten the arrays and remove NaN values
+    # Flatten all arrays
     lat_flat = lat.flatten()
     lng_flat = lng.flatten()
-    temp_flat = temp.flatten()
+    u_flat = u.flatten()
+    v_flat = v.flatten()
     
-    # Create mask for valid (non-NaN) values
-    valid_mask = ~(np.isnan(lat_flat) | np.isnan(lng_flat) | np.isnan(temp_flat))
+    # Plot temperature if requested
+    if plot_temp:
+        temp = np.array(data['variables']['temperature']['data'], dtype=float)
+        temp_flat = temp.flatten()
+        
+        # Valid points for temperature
+        valid_temp = ~(np.isnan(lat_flat) | np.isnan(lng_flat) | np.isnan(temp_flat))
+        
+        # Plot temperature as scatter with actual coordinates
+        scatter = ax.scatter(lng_flat[valid_temp], lat_flat[valid_temp], 
+                            c=temp_flat[valid_temp], s=50, cmap=cmap,
+                            edgecolors='none', alpha=0.9)
+        
+        # Horizontal colorbar at the bottom
+        cbar = plt.colorbar(scatter, ax=ax, orientation='horizontal', 
+                           pad=0.08, shrink=0.8, aspect=30)
+        cbar.set_label('Temperature (°C)', fontsize=12)
     
-    # Filter to valid points only
-    lat_valid = lat_flat[valid_mask]
-    lng_valid = lng_flat[valid_mask]
-    temp_valid = temp_flat[valid_mask]
-    
-    print(f"  Valid data points: {len(temp_valid)} out of {len(temp_flat)}")
-    
-    # Create a regular grid for interpolation
-    from scipy.interpolate import griddata
-    
-    # Define grid resolution
-    grid_lng = np.linspace(lng_valid.min(), lng_valid.max(), grid_size)
-    grid_lat = np.linspace(lat_valid.min(), lat_valid.max(), grid_size)
-    grid_lng, grid_lat = np.meshgrid(grid_lng, grid_lat)
-    
-    # Interpolate temperature values onto regular grid
-    grid_temp = griddata((lng_valid, lat_valid), temp_valid, 
-                         (grid_lng, grid_lat), method='cubic')
-    
-    # Create heatmap
-    im = ax.contourf(grid_lng, grid_lat, grid_temp, 
-                     levels=100,  # Number of contour levels
-                     cmap='RdYlBu_r',  # Red=warm, Blue=cold
-                     extend='both')
-    
-    # Add velocity quivers
-    u_flat = u_velocity.flatten()
-    v_flat = v_velocity.flatten()
-    
-    # Create mask for valid velocity values
-    valid_vel_mask = ~(np.isnan(lat_flat) | np.isnan(lng_flat) | 
-                       np.isnan(u_flat) | np.isnan(v_flat))
-    
-    lat_vel = lat_flat[valid_vel_mask]
-    lng_vel = lng_flat[valid_vel_mask]
-    u_vel = u_flat[valid_vel_mask]
-    v_vel = v_flat[valid_vel_mask]
-    
-    # Subsample for cleaner visualization
-    lat_vel_sub = lat_vel[::skip]
-    lng_vel_sub = lng_vel[::skip]
-    u_vel_sub = u_vel[::skip]
-    v_vel_sub = v_vel[::skip]
-    
-    # Add quiver plot
-    quiver = ax.quiver(lng_vel_sub, lat_vel_sub, u_vel_sub, v_vel_sub,
-                       color='black',  # Always black arrows
-                       scale=10.0,  # Larger scale = smaller arrows
-                       scale_units='xy',
-                       width=0.002,  # Arrow width
-                       headwidth=3,  # Arrow head width
-                       headlength=4,  # Arrow head length
-                       alpha=0.6)  # Transparency
-    
-    print(f"  Velocity arrows: {len(u_vel_sub)} displayed")
-    
-    # Colorbar
-    cbar = plt.colorbar(im, ax=ax, pad=0.02, shrink=0.8)
-    cbar.set_label('Temperature (°C)', fontsize=13)
+    # Plot velocity if requested
+    if plot_velocity:
+        # Valid points for velocity (with skip)
+        valid_vel = ~(np.isnan(lat_flat) | np.isnan(lng_flat) | np.isnan(u_flat) | np.isnan(v_flat))
+        
+        lat_vel = lat_flat[valid_vel][::skip]
+        lng_vel = lng_flat[valid_vel][::skip]
+        u_vel = u_flat[valid_vel][::skip]
+        v_vel = v_flat[valid_vel][::skip]
+        
+        # Calculate reference velocity for quiver key (10% of max velocity magnitude)
+        vel_magnitude = np.sqrt(u_vel**2 + v_vel**2)
+        ref_velocity = np.round(np.nanmax(vel_magnitude) * 0.1, 2)
+        if ref_velocity == 0:
+            ref_velocity = 0.1
+        
+        # Plot velocity arrows with user-defined scale
+        quiver = ax.quiver(lng_vel, lat_vel, u_vel, v_vel,
+                          scale=quiver_scale, color='black', alpha=0.7, 
+                          width=quiver_width)
+        
+        # Add quiver key (scale reference) with dynamic reference velocity
+        ax.quiverkey(quiver, 0.9, 0.95, ref_velocity, f'{ref_velocity} m/s', 
+                    labelpos='E', coordinates='figure')
     
     # Labels and title
-    ax.set_xlabel('Longitude', fontsize=13)
-    ax.set_ylabel('Latitude', fontsize=13)
-    ax.set_title(f'Lake Joux Water Temperature Map\nDepth: {depth:.2f} m | {time_str}', 
-                 fontsize=15, fontweight='bold', pad=20)
-    
-    # Grid
-    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, color='gray')
-    
-    # Equal aspect for geographic data
+    ax.set_xlabel('Longitude', fontsize=12)
+    ax.set_ylabel('Latitude', fontsize=12)
     ax.set_aspect('equal')
+    ax.grid(alpha=0.3)
+    
+    # Dynamic title based on what's plotted
+    title_parts = []
+    if plot_temp:
+        title_parts.append('Temperature')
+    if plot_velocity:
+        title_parts.append('Currents')
+    
+    title = f"Lake {' & '.join(title_parts)}\nDepth: {data['depth']['data']:.1f}m | {data['time']}"
+    ax.set_title(title, fontsize=14, fontweight='bold')
     
     plt.tight_layout()
-    
-    # Save if path provided
-    if save_path:
-        plt.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor='white')
-        print(f"\n✓ Map saved successfully to: {save_path}")
-    
     return fig, ax
 
-
-# Usage example
-# api_url = "https://alplakes-api.eawag.ch/simulations/layer/delft3d-flow/joux/202304050300/1?variables=temperature&variables=velocity"
-# data = fetch_and_save_alplakes_data(api_url)
-# fig, ax = plot_alplakes_temperature_velocity(data, grid_size=50, skip=5)
-# plt.show()
 
 
 def fetch_and_save_alplakes_point_data(lake, start_time, end_time, depth, lat, lon, 

@@ -6,7 +6,7 @@
 
 ## Overview
 
-This repository contains a Jupyter Notebook (`scripts/1D_visualisation_simstrat.ipynb`) with utilities to visualise 1D lake model output (Simstrat-like `T_out.dat`). The notebook provides functions to:
+This repository contains Jupyter Notebook with utilities to visualise 1D lake model output (Simstrat-like `T_out.dat`) and 3D lake model output. Model output can be accessed from Alplakes: https://www.alplakes.eawag.ch
 
 - Plot a temperature heatmap (depth vs time).
 - Extract and plot a time series at the nearest available depth (with aggregation options).
@@ -30,30 +30,25 @@ pip install -r requirements.txt
 ```bash
 jupyter notebook scripts/1D_visualisation_simstrat.ipynb
 ```
-
-3. Example (run inside the notebook):
-
-```python
-# load data (adjust path in the notebook if needed)
-# plot heatmap for 2024
-plot_temperature_heatmap(df, years=2024)
-
-# plot temperature at ~10 m (monthly aggregated)
-plot_temperature_at_depth(df, depth=10, agg='monthly')
-
-# compute and plot climatology
-ax, clim = plot_temperature_climatology(df, depth=0, period=(1981,2024), baseline_year=2012)
-
-# compare two sites (difference heatmap)
-compare_heatmaps('data/Geneva', 'data/Upper_Lugano', years=(2000,2020))
-```
-
-## Running notebook headless (execute & save outputs)
+or 
 
 ```bash
-./run_notebook.sh scripts/1D_visualisation_simstrat.ipynb
+jupyter notebook scripts/3D_visualisation_map.ipynb
 ```
 
+3. Possible visualisations 1D
 
+- `plot_temperature_heatmap(df, years=None, ...)` — plot temperature heatmap (depth vs time).
+- `plot_temperature_at_depth(df, depth, ...)` — extract and plot a time series at the nearest available depth (with aggregation options).
+- `plot_temperature_climatology(df, depth, ...)` — compute and plot daily-of-year climatology (mean, std, min, max) with optional baseline-year overlay.
+- `compare_heatmaps(path1, path2, ...)` — load two site outputs and plot their difference heatmap (restricted to shallowest system).
+- `plot_two_sites_at_depth(path1, path2, depth, ...)` — extract and plot aligned time series from two sites at a given depth.
+
+3. Possible visualisations 3D
+
+- `plot_alplakes_pcolormesh(data, ...)` — plot a map of temperature and current for a given lake at a given time and depth .
+- `plot_temperature_timeseries(data, ...)` — plot a time serie of temperature for a given lake at a given location (x,y,z) over a given period.
+- `plot_alplakes_transect(data,...)` — plot a transect for a given lake at a given time. Transect is defined with lat, lon coordinates
+- `plot_alplakes_transect_timeseries(data, ...` — plot a transect for a given lake over a given period. Transect is defined with lat, lon coordinates.
 
 

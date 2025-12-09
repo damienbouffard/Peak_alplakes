@@ -10,6 +10,448 @@ import json
 import requests
 
 
+
+import json
+import requests
+
+
+
+
+import pandas as pd
+import numpy as np
+import json
+import requests
+
+
+def generate_path_API_1D(model, lake, start, stop, variables="T"):
+    """
+    Generate API path for 1D simulation data.
+    
+    Parameters:
+    -----------
+    model : str
+        The simulation model (e.g., 'simstrat')
+    lake : str
+        The lake name (e.g., 'aegeri')
+    start : str
+        Start datetime in format 'YYYYMMDDHHMM' (e.g., '202405050300')
+    stop : str
+        Stop datetime in format 'YYYYMMDDHHMM' (e.g., '202406072300')
+    variables : str, optional
+        Variables to query (default: 'T' for temperature)
+    
+    Returns:
+    --------
+    str
+        Complete API URL path
+    """
+    base_url = "https://alplakes-api.eawag.ch/simulations/1d/depthtime"
+    return f"{base_url}/{model}/{lake}/{start}/{stop}?variables={variables}"
+
+
+def read_API_1D_to_dataframe(api_url_or_json_path, variable='T'):
+    """
+    Read API JSON data and convert to pandas DataFrame with datetime index.
+    
+    This function reads JSON data from either:
+    - A URL (API endpoint)
+    - A local JSON file path
+    
+    The JSON structure should contain:
+    - 'time': list of datetime strings
+    - 'depth': dict with 'data' (list of depth values), 'unit', 'description'
+    - 'variables': dict with variable names as keys (e.g., 'T' for temperature)
+      Each variable contains 'data' (2D array), 'unit', 'description'
+    
+    Parameters:
+    -----------
+    api_url_or_json_path : str
+        Either a URL to the API endpoint or a path to a local JSON file
+    variable : str, optional
+        Variable name to extract (default: 'T' for temperature)
+    
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with:
+        - First column: 'Datetime' (timezone-naive datetime64[ns])
+        - Remaining columns: Depth values (e.g., '-81.000' to '-0.000')
+        - Values: Temperature or other variable data
+        
+    Note: Datetime values are converted to timezone-naive for better compatibility
+          with numpy and most pandas operations.
+    
+    Example:
+    --------
+    >>> # From API
+    >>> url = generate_path_API_1D('simstrat', 'aegeri', '202405050300', '202406072300')
+    >>> df = read_API_1D_to_dataframe(url)
+    >>> print(df.columns)
+    Index(['Datetime', '-81.000', '-80.000', ..., '-1.000', '-0.000'], dtype='object')
+    
+    >>> # From local file
+    >>> df = read_API_1D_to_dataframe('ttt.json')
+    """
+    
+    # Load JSON data
+    if api_url_or_json_path.startswith('http'):
+        # Fetch from API with timeout
+        try:
+            response = requests.get(api_url_or_json_path, timeout=300)  # 5 minute timeout
+            response.raise_for_status()
+            data = response.json()
+        except requests.exceptions.Timeout:
+            raise TimeoutError(
+                "API request timed out. The date range might be too large. "
+                "Try requesting smaller time periods (e.g., one year at a time)."
+            )
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 504:
+                raise TimeoutError(
+                    f"API gateway timeout (504). The date range is too large. "
+                    f"Try requesting smaller time periods (e.g., one year at a time) or use fetch_API_1D_chunked()."
+                )
+            else:
+                raise
+    else:
+        # Load from local file
+        with open(api_url_or_json_path, 'r') as f:
+            data = json.load(f)
+    
+    # Extract time, depth, and variable data
+    time = data['time']
+    depth_values = data['depth']['data']
+    variable_data = data['variables'][variable]['data']
+    
+    # Convert depth values to negative (representing depth below surface)
+    # Format with 3 decimal places
+    depth_values_negative = [f"{-d:.3f}" for d in depth_values]
+    
+    # The API returns data as [depth x time], we need [time x depth]
+    # So we need to transpose the data
+    variable_data_transposed = np.array(variable_data).T
+    
+    # Create DataFrame
+    # Rows = time points, Columns = depth values (negative, 3 decimals)
+    df = pd.DataFrame(variable_data_transposed, columns=depth_values_negative)
+    
+    # Convert time strings to datetime and remove timezone (convert to naive datetime)
+    datetime_series = pd.to_datetime(time).tz_localize(None)
+    
+    # Add Datetime as a column (not index)
+    df.insert(0, 'Datetime', datetime_series)
+    
+    return df
+
+
+def fetch_API_1D_chunked(model, lake, start, stop, variables="T", chunk_months=12, save_csv=None):
+    """
+    Fetch large date ranges from API in smaller chunks and combine them.
+    
+    This function automatically splits large date ranges into smaller chunks
+    to avoid API timeouts.
+    
+    Parameters:
+    -----------
+    model : str
+        The simulation model (e.g., 'simstrat')
+    lake : str
+        The lake name (e.g., 'geneva')
+    start : str
+        Start datetime in format 'YYYYMMDDHHMM' (e.g., '198101010000')
+    stop : str
+        Stop datetime in format 'YYYYMMDDHHMM' (e.g., '202406072300')
+    variables : str, optional
+        Variables to query (default: 'T' for temperature)
+    chunk_months : int, optional
+        Number of months per chunk (default: 12 for yearly chunks)
+    save_csv : str, optional
+        Path to save the resulting DataFrame as CSV (default: None, no save)
+        Example: 'output.csv' or '/path/to/file.csv'
+    
+    Returns:
+    --------
+    pd.DataFrame
+        Combined DataFrame with all data
+    
+    Example:
+    --------
+    >>> # Fetch 43 years of data in yearly chunks
+    >>> df = fetch_API_1D_chunked('simstrat', 'geneva', '198101010000', '202406072300')
+    
+    >>> # Fetch and save to CSV
+    >>> df = fetch_API_1D_chunked('simstrat', 'geneva', '198101010000', '202406072300', 
+    ...                            save_csv='geneva_1981_2024.csv')
+    """
+    from datetime import datetime, timedelta
+    from dateutil.relativedelta import relativedelta
+    
+    # Parse start and stop dates
+    start_dt = datetime.strptime(start, '%Y%m%d%H%M')
+    stop_dt = datetime.strptime(stop, '%Y%m%d%H%M')
+    
+    dfs = []
+    current_start = start_dt
+    
+    print(f"Fetching data from {start_dt} to {stop_dt} in {chunk_months}-month chunks...")
+    
+    chunk_count = 0
+    while current_start < stop_dt:
+        # Calculate chunk end (either chunk_months ahead or final stop date)
+        current_stop = min(
+            current_start + relativedelta(months=chunk_months),
+            stop_dt
+        )
+        
+        # Format dates back to API format
+        chunk_start_str = current_start.strftime('%Y%m%d%H%M')
+        chunk_stop_str = current_stop.strftime('%Y%m%d%H%M')
+        
+        # Generate URL and fetch
+        url = generate_path_API_1D(model, lake, chunk_start_str, chunk_stop_str, variables)
+        
+        chunk_count += 1
+        print(f"  Chunk {chunk_count}: {current_start.date()} to {current_stop.date()}...", end=' ')
+        
+        try:
+            df_chunk = read_API_1D_to_dataframe(url, variable=variables)
+            dfs.append(df_chunk)
+            print(f"✓ ({len(df_chunk)} rows)")
+        except Exception as e:
+            print(f"✗ Error: {e}")
+            # Continue with next chunk even if this one fails
+        
+        # Move to next chunk
+        current_start = current_stop
+    
+    if not dfs:
+        raise ValueError("No data was successfully fetched")
+    
+    # Combine all chunks
+    print(f"\nCombining {len(dfs)} chunks...")
+    df_combined = pd.concat(dfs, axis=0, ignore_index=True)
+    
+    # Remove any duplicate timestamps (at chunk boundaries)
+    df_combined = df_combined.drop_duplicates(subset=['Datetime'], keep='first')
+    
+    # Reset index after dropping duplicates
+    df_combined = df_combined.reset_index(drop=True)
+    
+    print(f"✓ Total: {len(df_combined)} rows")
+    
+    # Save to CSV if requested
+    if save_csv:
+        print(f"\nSaving to CSV: {save_csv}...")
+        # Create directory if it doesn't exist
+        import os
+        csv_dir = os.path.dirname(save_csv)
+        if csv_dir and not os.path.exists(csv_dir):
+            os.makedirs(csv_dir, exist_ok=True)
+            print(f"  Created directory: {csv_dir}")
+        df_combined.to_csv(save_csv, index=False)
+        print(f"✓ Saved successfully")
+    
+    return df_combined
+
+
+def load_lake_data(model, lake, start, stop, variables="T", 
+                   local_path=None, save_csv=None, chunk_months=12, 
+                   force_download=False, file_priority='dat'):
+    """
+    Smart function to load lake simulation data from local file or API.
+    
+    This function automatically decides whether to:
+    1. Load from a local file (if it exists and is not stale)
+    2. Download from the API (if local file doesn't exist or is outdated)
+    
+    Parameters:
+    -----------
+    model : str
+        The simulation model (e.g., 'simstrat')
+    lake : str
+        The lake name (e.g., 'geneva', 'aegeri')
+    start : str
+        Start datetime in format 'YYYYMMDDHHMM'
+    stop : str
+        Stop datetime in format 'YYYYMMDDHHMM'
+    variables : str, optional
+        Variables to query (default: 'T' for temperature)
+    local_path : str, optional
+        Path to check for local data file. Can be:
+        - CSV file: 'data/geneva/temperature.csv'
+        - DAT file: 'data/geneva/T_out.dat'
+        - Directory: 'data/geneva' (will search for files based on file_priority)
+        If None, always downloads from API
+    save_csv : str, optional
+        Path to save downloaded data as CSV (default: None)
+    chunk_months : int, optional
+        Number of months per chunk when downloading (default: 12)
+    force_download : bool, optional
+        If True, always download from API even if local file exists (default: False)
+    file_priority : str, optional
+        When local_path is a directory with multiple files, which to prioritize:
+        - 'dat': Prioritize .dat files over .csv (default)
+        - 'csv': Prioritize .csv files over .dat
+        Example: If directory has both T_out.dat and temperature.csv:
+            file_priority='dat' → loads T_out.dat
+            file_priority='csv' → loads temperature.csv
+    save_csv : str, optional
+        Path to save downloaded data as CSV (default: None)
+    chunk_months : int, optional
+        Number of months per chunk when downloading (default: 12)
+    force_download : bool, optional
+        If True, always download from API even if local file exists (default: False)
+    
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with lake simulation data
+    
+    Examples:
+    ---------
+    >>> # Try local first, download if needed
+    >>> df = load_lake_data('simstrat', 'geneva', '198101010000', '202406072300',
+    ...                      local_path='data/Geneva/T_out.dat')
+    
+    >>> # Always download and save
+    >>> df = load_lake_data('simstrat', 'geneva', '198101010000', '202406072300',
+    ...                      force_download=True, save_csv='geneva_new.csv')
+    
+    >>> # Download if no local file exists
+    >>> df = load_lake_data('simstrat', 'aegeri', '202001010000', '202406072300',
+    ...                      local_path='data/aegeri/', save_csv='data/aegeri/temperature.csv')
+    """
+    import os
+    
+    # Determine if we should try to load from local file
+    should_load_local = False
+    local_file_path = None
+    
+    if local_path and not force_download:
+        if os.path.isdir(local_path):
+            # Check for common filenames in the directory based on priority
+            if file_priority == 'dat':
+                # Prioritize DAT files
+                possible_files = [
+                    os.path.join(local_path, 'T_out.dat'),
+                    os.path.join(local_path, 'temperature.csv'),
+                    os.path.join(local_path, f'{lake}_temperature.csv'),
+                ]
+            elif file_priority == 'csv':
+                # Prioritize CSV files
+                possible_files = [
+                    os.path.join(local_path, 'temperature.csv'),
+                    os.path.join(local_path, f'{lake}_temperature.csv'),
+                    os.path.join(local_path, 'T_out.dat'),
+                ]
+            else:
+                raise ValueError(f"file_priority must be 'dat' or 'csv', got: {file_priority}")
+            
+            for file_path in possible_files:
+                if os.path.exists(file_path):
+                    local_file_path = file_path
+                    should_load_local = True
+                    break
+        elif os.path.isfile(local_path):
+            local_file_path = local_path
+            should_load_local = True
+    
+    # Load from local file if available
+    if should_load_local:
+        print(f"Loading data from local file: {local_file_path}")
+        file_ext = os.path.splitext(local_file_path)[1].lower()
+        
+        if file_ext == '.csv':
+            # Load CSV file
+            df = pd.read_csv(local_file_path)
+            if 'Datetime' in df.columns:
+                df['Datetime'] = pd.to_datetime(df['Datetime'])
+            print(f"✓ Loaded {len(df)} rows from CSV")
+            
+        elif file_ext == '.dat':
+            # Load DAT file (Simstrat format)
+            # Format: First column is days since reference date
+            df = pd.read_csv(local_file_path)
+            
+            # Get the time column (first column)
+            time_col = df.columns[0]
+            time_values = df[time_col]
+            
+            # Get depth columns (all columns except first)
+            depth_columns = df.columns[1:].tolist()
+            
+            # Convert first column (days) to datetime
+            # Assuming reference date is 1981-01-01 (common for Simstrat)
+            datetime_values = pd.Timestamp('1981-01-01') + pd.to_timedelta(time_values, unit='D')
+            
+            # Create new column names with proper formatting
+            new_columns = ['Datetime']
+            for col in depth_columns:
+                try:
+                    depth = float(col)
+                    # Assume positive values in DAT file should be negative (depth below surface)
+                    if depth >= 0:
+                        new_columns.append(f'-{depth:.3f}')
+                    else:
+                        new_columns.append(f'{depth:.3f}')
+                except:
+                    # Keep non-numeric column names as-is
+                    new_columns.append(col)
+            
+            # Create new dataframe with proper structure
+            data_dict = {'Datetime': datetime_values}
+            for i, old_col in enumerate(depth_columns):
+                data_dict[new_columns[i+1]] = df[old_col].values
+            
+            df = pd.DataFrame(data_dict)
+            
+            print(f"✓ Loaded {len(df)} rows from DAT file")
+        
+        else:
+            raise ValueError(f"Unsupported file format: {file_ext}. Use .csv or .dat")
+        
+        # Filter by date range
+        start_dt = pd.to_datetime(start, format='%Y%m%d%H%M')
+        stop_dt = pd.to_datetime(stop, format='%Y%m%d%H%M')
+        
+        df = df[(df['Datetime'] >= start_dt) & (df['Datetime'] <= stop_dt)]
+        print(f"✓ Filtered to date range: {len(df)} rows between {start_dt.date()} and {stop_dt.date()}")
+        
+        return df
+    
+    # Download from API
+    else:
+        if force_download:
+            print(f"Force download enabled - fetching from API...")
+        elif local_path:
+            print(f"Local file not found at: {local_path}")
+            print(f"Downloading from API...")
+        else:
+            print(f"No local path specified - downloading from API...")
+        
+        # Create save directory if needed
+        if save_csv:
+            csv_dir = os.path.dirname(save_csv)
+            if csv_dir and not os.path.exists(csv_dir):
+                os.makedirs(csv_dir, exist_ok=True)
+                print(f"✓ Created directory: {csv_dir}")
+        
+        df = fetch_API_1D_chunked(
+            model=model,
+            lake=lake,
+            start=start,
+            stop=stop,
+            variables=variables,
+            chunk_months=chunk_months,
+            save_csv=save_csv
+        )
+        
+        return df
+
+
+
+
+
 # Function to plot temperature heatmap
 def plot_temperature_heatmap(df, years=None, cmap='viridis', vmin=None, vmax=None, figsize=(14,6), n_xticks=10, savepath=None):
     """Plot a temperature heatmap over depth and time.
@@ -510,12 +952,17 @@ def plot_two_sites_at_depth(path1, path2, depth, years=None, agg='daily', method
 # ax, df = plot_two_sites_at_depth('data/Geneva', 'data/Upper_Lugano', depth=10, years=(2000,2020), agg='monthly', savepath='figures/compare_10m.png')
 
 
-import pandas as pd
-import numpy as np
-import json
-import requests
 
 
+
+
+
+##########################
+##########################
+##########################
+##########################
+##########################
+# deprecated
 def generate_path_API_1D(model, lake, start, stop, variables="T"):
     """
     Generate API path for 1D simulation data.

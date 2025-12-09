@@ -551,7 +551,7 @@ def plot_temperature_at_depth(df, depth, agg='daily', method='mean', figsize=(12
     - agg: 'daily', 'monthly', 'yearly' or pandas-style freq codes 'D','M','Y'. If None, no aggregation.
     - method: aggregation method: 'mean' or 'median'.
     - figsize: figure size tuple.
-    - savepath: optional path to save the figure (PNG).
+    - savepath: 👉 optional path to save the figure (../figures/temperature_lake_X_Xm.png).
     Returns: matplotlib Axes object.
     """
     d = df.copy()

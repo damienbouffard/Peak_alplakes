@@ -915,7 +915,7 @@ def plot_two_sites_at_depth(path1, path2, depth, years=None, agg='daily', method
     s1, col1, d1 = load_series(path1, years)
     s2, col2, d2 = load_series(path2, years)
     # Aggregation mapping
-    agg_map = {'daily':'D','monthly':'M','yearly':'Y','D':'D','M':'M','Y':'Y', None: None}
+    agg_map = {'daily':'D','monthly':'ME','yearly':'Y','D':'D','M':'M','Y':'Y', None: None}
     if agg not in agg_map:
         raise ValueError("`agg` must be one of 'daily','monthly','yearly','D','M','Y' or None")
     freq = agg_map[agg]

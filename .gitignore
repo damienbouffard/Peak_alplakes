@@ -29,3 +29,5 @@ output/
 T_out.dat
 *.nc
 *.json
+*.dat
+*.csv

@@ -390,7 +390,7 @@ def load_lake_data(model, lake, start, stop, variables="T",
                 try:
                     depth = float(col)
                     # Assume positive values in DAT file should be negative (depth below surface)
-                    if depth >= 0:
+                    if depth > 0:
                         new_columns.append(f'-{depth:.3f}')
                     else:
                         new_columns.append(f'{depth:.3f}')

@@ -16,7 +16,8 @@ venv/
 .DS_Store
 
 # Figures and outputs
-figures/
+figures/*
+!figures/.gitkeep
 output/
 
 # Editor directories

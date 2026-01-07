@@ -212,6 +212,7 @@ def fetch_and_save_alplakes_data_map(lake, date, depth, variables, model='delft3
                 # Save the CSV
                 csv_data.to_csv(csv_path, index=False)
                 
+
                 if verbose:
                     print(f"✓ CSV data saved to: {csv_path}")
                     print(f"  - Rows: {len(csv_data)}")
@@ -958,7 +959,7 @@ def _find_time_index(time_list, time_input):
 
 
 
-def plot_alplakes_transect_timeseries(data, lake, figsize=(18, 10), 
+def OLDplot_alplakes_transect_timeseries(data, lake, figsize=(18, 10), 
                                      plot_temp=True, plot_velocity=False, cmap='jet',
                                      levels=20, time_range=None, time_step=None,
                                      quiver_scale=50, quiver_width=0.002, alpha_quiver=0.6,
@@ -1343,6 +1344,648 @@ def plot_alplakes_transect_timeseries(data, lake, figsize=(18, 10),
         print(f"  - Format: {format.upper()}")
         print(f"  - Resolution: {dpi} DPI")
         print(f"  - Number of time steps: {n_times}")
+    
+    return fig, axes
+
+def plot_alplakes_transect_timeseries(data, lake, figsize=(18, 10), 
+                                     plot_temp=True, plot_velocity=False, cmap='jet',
+                                     levels=20, time_range=None, time_step=None,
+                                     quiver_scale=50, quiver_width=0.002, alpha_quiver=0.6,
+                                     save_fig=False, save_path=None, dpi=300, format='png',
+                                     save_gif=False, gif_path=None, gif_fps=2, gif_dpi=100):
+    """
+    Plot temperature evolution over time as a time-depth contour plot with optional velocity vectors
+    
+    Parameters:
+    -----------
+    data : dict
+        The JSON data from Alplakes transect API
+    lake : str
+        Name of the lake (e.g., 'zurich', 'geneva', 'constance')
+        Used for automatic filename generation
+    figsize : tuple, optional
+        Figure size in inches (default: (18, 10))
+        If default is used, the figure size will automatically scale based on 
+        the number of time steps to maintain good subplot proportions.
+        To disable auto-scaling, provide a custom figsize value.
+    plot_temp : bool, optional
+        Whether to plot temperature (default: True)
+    plot_velocity : bool, optional
+        Whether to plot velocity arrows (default: False)
+    cmap : str, optional
+        Colormap for temperature (default: 'jet')
+        Other options: 'viridis', 'plasma', 'turbo', 'coolwarm', 'RdYlBu_r'
+    levels : int, optional
+        Number of contour levels (default: 20)
+    time_range : tuple of (start, end), optional
+        Time range to plot. Each can be:
+        - String in ISO format: '2025-10-23T15:00:00'
+        - datetime object
+        - Integer index
+        - None (uses all times)
+        Example: ('2025-10-23T15:00', '2025-10-24T06:00')
+    time_step : int, float, or str, optional
+        Time interval between plots. Can be:
+        - Integer: number of time steps to skip (e.g., 2 = every other time)
+        - Float: hours between plots (e.g., 24.0 = every 24 hours)
+        - String: '3h', '6h', '12h', '24h' (hours between plots)
+        - None: use all available times (default)
+        Example: time_step=24.0 for daily intervals
+    quiver_scale : float, optional
+        Scale for velocity arrows - larger values = smaller arrows (default: 50)
+        Try values between 20-100 depending on velocity magnitude
+    quiver_width : float, optional
+        Width of velocity arrows (default: 0.002)
+    alpha_quiver : float, optional
+        Transparency of velocity arrows (default: 0.6)
+    save_fig : bool, optional
+        Whether to save the figure (default: False)
+        If True and save_path is None, generates automatic filename from data
+    save_path : str, optional
+        Custom path to save the figure (default: None)
+        If None and save_fig=True, auto-generates filename like:
+        'lake_geneva_transect_timeseries_2025-10-23_to_2025-10-24.png'
+        Example: 'output/transect_evolution.png' or 'results/time_series.pdf'
+    dpi : int, optional
+        Resolution for saved figure in dots per inch (default: 300)
+        Higher values = better quality but larger file size
+        Recommended: 150 (draft), 300 (publication), 600 (high quality)
+    format : str, optional
+        File format for saved figure (default: 'png')
+        Options: 'png', 'pdf', 'svg', 'jpg', 'tiff'
+    save_gif : bool, optional
+        Whether to save an animated GIF (default: False)
+        Creates animation showing temporal evolution of the transect
+    gif_path : str, optional
+        Custom path to save the GIF (default: None)
+        If None and save_gif=True, auto-generates filename like:
+        'lake_geneva_transect_animation_2025-10-23_to_2025-10-24.gif'
+    gif_fps : float, optional
+        Frames per second for the GIF animation (default: 2)
+        Higher values = faster animation
+        Recommended: 1-5 fps for most cases
+    gif_dpi : int, optional
+        Resolution for GIF frames (default: 100)
+        Lower than static images to keep file size reasonable
+        Recommended: 80-150 for GIFs
+    
+    Returns:
+    --------
+    fig, axes : matplotlib figure and axes objects
+    
+    Examples:
+    ---------
+    >>> # Plot all time steps (temperature only)
+    >>> fig, axes = plot_alplakes_transect_timeseries(data, lake='geneva')
+    
+    >>> # Create animated GIF
+    >>> fig, axes = plot_alplakes_transect_timeseries(
+    ...     data, 
+    ...     lake='geneva',
+    ...     save_gif=True,
+    ...     gif_fps=2
+    ... )
+    
+    >>> # Create GIF with specific time step
+    >>> fig, axes = plot_alplakes_transect_timeseries(
+    ...     data, 
+    ...     lake='zurich',
+    ...     time_step='6h',
+    ...     save_gif=True,
+    ...     gif_fps=3,
+    ...     gif_dpi=120
+    ... )
+    
+    >>> # Save both static figure and animated GIF
+    >>> fig, axes = plot_alplakes_transect_timeseries(
+    ...     data, 
+    ...     lake='geneva',
+    ...     plot_velocity=True,
+    ...     save_fig=True,
+    ...     save_gif=True,
+    ...     gif_fps=2
+    ... )
+    
+    >>> plt.show()
+    """
+    
+    # Import required libraries for GIF creation
+    if save_gif:
+        try:
+            from PIL import Image
+            import io
+        except ImportError:
+            print("Warning: PIL (Pillow) is required for GIF creation. Install with: pip install Pillow")
+            save_gif = False
+    
+    # Extract data
+    times = data['time']
+    distance = np.array(data['distance']['data'], dtype=float)
+    depth = np.array(data['depth']['data'], dtype=float)
+    lat = np.array(data['lat'], dtype=float)
+    lng = np.array(data['lng'], dtype=float)
+    
+    # Filter time range if specified
+    if time_range is not None:
+        start_time, end_time = time_range
+        start_idx = _find_time_index(times, start_time) if start_time is not None else 0
+        end_idx = _find_time_index(times, end_time) if end_time is not None else len(times) - 1
+        
+        # Create filtered lists
+        time_indices = list(range(start_idx, end_idx + 1))
+    else:
+        time_indices = list(range(len(times)))
+    
+    # Parse time_step parameter
+    if time_step is not None:
+        if isinstance(time_step, str):
+            # Parse string like '3h', '6h', '24h'
+            if time_step.endswith('h'):
+                target_hours = float(time_step[:-1])
+            else:
+                raise ValueError(f"time_step string must end with 'h', got: {time_step}")
+        elif isinstance(time_step, (int, float)):
+            if time_step >= 1 and time_step == int(time_step) and time_step < 10:
+                # Small integer - treat as index step
+                time_indices = time_indices[::int(time_step)]
+                target_hours = None
+            else:
+                # Float or large number - treat as hours
+                target_hours = float(time_step)
+        else:
+            raise ValueError(f"time_step must be int, float, or str, got {type(time_step)}")
+        
+        # If we have target hours, filter by time intervals
+        if time_step is not None and isinstance(time_step, (float, str)):
+            # Convert times to datetime objects
+            time_dts = []
+            for idx in time_indices:
+                t_str = times[idx].replace('Z', '+00:00')
+                try:
+                    time_dts.append(datetime.fromisoformat(t_str))
+                except:
+                    time_dts.append(datetime.strptime(t_str, '%Y-%m-%dT%H:%M:%S'))
+            
+            # Filter to get roughly the desired interval
+            if len(time_dts) > 0:
+                filtered_indices = [time_indices[0]]  # Always include first
+                last_time = time_dts[0]
+                
+                for i, (idx, dt) in enumerate(zip(time_indices[1:], time_dts[1:]), 1):
+                    hours_diff = abs((dt - last_time).total_seconds() / 3600)
+                    if hours_diff >= target_hours * 0.9:  # 90% tolerance
+                        filtered_indices.append(idx)
+                        last_time = dt
+                
+                time_indices = filtered_indices
+    
+    # Get filtered time strings
+    times_filtered = [times[i] for i in time_indices]
+    
+    # Get the 3D temperature data [time, depth, distance]
+    temp_3d = np.array(data['variables']['temperature']['data'], dtype=float)
+    
+    # Get velocity data if plotting velocities
+    if plot_velocity:
+        u_3d = np.array(data['variables']['u']['data'], dtype=float)  # Eastward velocity
+        v_3d = np.array(data['variables']['v']['data'], dtype=float)  # Northward velocity
+        
+        # Calculate the angle of the transect for velocity projection
+        delta_lat = lat[-1] - lat[0]
+        delta_lng = lng[-1] - lng[0]
+        transect_angle = np.arctan2(delta_lat, delta_lng)
+    
+    # Convert depth to negative values
+    depth_negative = -np.abs(depth)
+    
+    # Create figure with subplots for each time step
+    n_times = len(times_filtered)
+    n_cols = 3
+    n_rows = int(np.ceil(n_times / n_cols))
+    
+    # Dynamically adjust figure size based on number of subplots
+    # If figsize was provided as default (18, 10), scale it
+    if figsize == (18, 10):
+        # Calculate optimal size: each subplot should be roughly 6x4 inches
+        subplot_width = 6
+        subplot_height = 4
+        
+        # Add space for margins and colorbar
+        fig_width = n_cols * subplot_width + 2  # +2 for colorbar space
+        fig_height = n_rows * subplot_height + 1.5  # +1.5 for title space
+        
+        # Cap the maximum size to prevent excessively large figures
+        fig_width = min(fig_width, 22)
+        fig_height = min(fig_height, 30)
+        
+        dynamic_figsize = (fig_width, fig_height)
+    else:
+        # User provided custom figsize, respect it
+        dynamic_figsize = figsize
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=dynamic_figsize, 
+                            sharex=True, sharey=True)
+    axes = axes.flatten() if n_times > 1 else [axes]
+    
+    # Get global min/max for consistent color scale
+    temp_min = np.nanmin(temp_3d)
+    temp_max = np.nanmax(temp_3d)
+    
+    # Create meshgrid
+    Distance, Depth = np.meshgrid(distance, depth_negative)
+    
+    # Calculate subsampling for velocity arrows
+    if plot_velocity:
+        skip_dist = max(1, len(distance) // 15)  # Show ~15 arrows horizontally (fewer for small subplots)
+        skip_depth = max(1, len(depth) // 10)     # Show ~10 arrows vertically
+    
+    # Calculate time deltas for display
+    time_deltas = []
+    
+    # Adjust font sizes based on number of subplots
+    if n_times <= 3:
+        title_fontsize = 11
+        label_fontsize = 10
+        suptitle_fontsize = 14
+    elif n_times <= 6:
+        title_fontsize = 10
+        label_fontsize = 9
+        suptitle_fontsize = 13
+    elif n_times <= 12:
+        title_fontsize = 9
+        label_fontsize = 8
+        suptitle_fontsize = 12
+    else:
+        title_fontsize = 8
+        label_fontsize = 7
+        suptitle_fontsize = 11
+    
+    if n_times > 1:
+        for i in range(len(time_indices)):
+            if i == 0:
+                time_deltas.append(None)  # First plot has no delta
+            else:
+                # Calculate time difference from previous plot
+                t1_str = times[time_indices[i-1]].replace('Z', '+00:00')
+                t2_str = times[time_indices[i]].replace('Z', '+00:00')
+                try:
+                    t1 = datetime.fromisoformat(t1_str)
+                    t2 = datetime.fromisoformat(t2_str)
+                except:
+                    t1 = datetime.strptime(t1_str, '%Y-%m-%dT%H:%M:%S')
+                    t2 = datetime.strptime(t2_str, '%Y-%m-%dT%H:%M:%S')
+                
+                delta_seconds = (t2 - t1).total_seconds()
+                delta_hours = delta_seconds / 3600
+                
+                # Format delta nicely
+                if delta_hours >= 24:
+                    delta_str = f"+{delta_hours/24:.1f}d"
+                elif delta_hours >= 1:
+                    delta_str = f"+{delta_hours:.1f}h"
+                else:
+                    delta_str = f"+{delta_hours*60:.0f}min"
+                
+                time_deltas.append(delta_str)
+    
+    for plot_idx, time_idx in enumerate(time_indices):
+        if plot_idx >= n_times:
+            axes[plot_idx].set_visible(False)
+            continue
+            
+        ax = axes[plot_idx]
+        time_str = times_filtered[plot_idx]
+        
+        # Get 2D slice for this time
+        temp_2d = temp_3d[time_idx, :, :]
+        temp_masked = np.ma.masked_invalid(temp_2d)
+        
+        # Plot temperature if requested
+        if plot_temp:
+            mesh = ax.pcolormesh(Distance/1000, Depth, temp_masked, 
+                               cmap=cmap, shading='auto',
+                               vmin=temp_min, vmax=temp_max)
+        
+        # Plot velocity vectors if requested
+        if plot_velocity:
+            # Get velocity data for this time
+            u_2d = u_3d[time_idx, :, :]
+            v_2d = v_3d[time_idx, :, :]
+            
+            # Create subsampled arrays
+            Distance_sub = Distance[::skip_depth, ::skip_dist]
+            Depth_sub = Depth[::skip_depth, ::skip_dist]
+            u_sub = u_2d[::skip_depth, ::skip_dist]
+            v_sub = v_2d[::skip_depth, ::skip_dist]
+            
+            # Project velocity onto transect direction (along-transect component)
+            vel_along = u_sub * np.cos(transect_angle) + v_sub * np.sin(transect_angle)
+            
+            # For now, we don't have vertical velocity, so use zeros
+            vel_vertical = np.zeros_like(vel_along)
+            
+            # Filter out NaN values
+            valid = ~(np.isnan(Distance_sub) | np.isnan(Depth_sub) | 
+                     np.isnan(vel_along) | np.isnan(vel_vertical))
+            
+            # Plot velocity arrows
+            quiver = ax.quiver(Distance_sub[valid]/1000, Depth_sub[valid], 
+                              vel_along[valid], vel_vertical[valid],
+                              scale=quiver_scale, width=quiver_width,
+                              color='black', alpha=alpha_quiver,
+                              headwidth=3, headlength=4)
+        
+        # Format time
+        try:
+            dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+            time_formatted = dt.strftime('%m-%d %H:%M')
+        except:
+            time_formatted = time_str[:16]
+        
+        # Add time delta to title if not first plot
+        if time_deltas and plot_idx < len(time_deltas) and time_deltas[plot_idx]:
+            title_text = f'{time_formatted}\n({time_deltas[plot_idx]})'
+        else:
+            title_text = time_formatted
+        
+        ax.set_title(title_text, fontsize=title_fontsize, fontweight='bold')
+        ax.grid(alpha=0.3, linestyle=':', linewidth=0.5)
+        ax.axhline(y=0, color='darkblue', linestyle='--', 
+                  linewidth=1, alpha=0.5)
+        
+        # Labels only on left and bottom
+        if plot_idx % n_cols == 0:
+            ax.set_ylabel('Depth (m)', fontsize=label_fontsize)
+        if plot_idx >= n_times - n_cols:
+            ax.set_xlabel('Distance (km)', fontsize=label_fontsize)
+    
+    # Add single colorbar for all subplots (only if plotting temperature)
+    if plot_temp:
+        fig.subplots_adjust(right=0.92)
+        cbar_ax = fig.add_axes([0.94, 0.15, 0.02, 0.7])
+        cbar = fig.colorbar(mesh, cax=cbar_ax)
+        cbar.set_label('Temperature (°C)', fontsize=label_fontsize+1, fontweight='bold')
+    
+    # Overall title - dynamic based on what's plotted
+    title_parts = []
+    if plot_temp:
+        title_parts.append('Temperature')
+    if plot_velocity:
+        title_parts.append('Currents')
+    
+    fig.suptitle(f'Lake Transect {" & ".join(title_parts)} Evolution\n' + 
+                f'From ({lat[0]:.4f}°, {lng[0]:.4f}°) → ' +
+                f'To ({lat[-1]:.4f}°, {lng[-1]:.4f}°)',
+                fontsize=suptitle_fontsize, fontweight='bold', y=0.98)
+    
+    plt.tight_layout(rect=[0, 0, 0.92, 0.96])
+    
+    # Save figure if requested
+    if save_fig or save_path is not None:
+        # Generate automatic filename if save_path not provided
+        if save_path is None:
+            # Extract information from data
+            lake_name = lake
+            
+            # Get start and end times for filename
+            start_time_str = times_filtered[0].replace('Z', '+00:00')
+            end_time_str = times_filtered[-1].replace('Z', '+00:00')
+            
+            try:
+                start_dt = datetime.fromisoformat(start_time_str)
+                end_dt = datetime.fromisoformat(end_time_str)
+                start_date = start_dt.strftime('%Y-%m-%d')
+                end_date = end_dt.strftime('%Y-%m-%d')
+            except:
+                start_dt = datetime.strptime(start_time_str, '%Y-%m-%dT%H:%M:%S')
+                end_dt = datetime.strptime(end_time_str, '%Y-%m-%dT%H:%M:%S')
+                start_date = start_dt.strftime('%Y-%m-%d')
+                end_date = end_dt.strftime('%Y-%m-%d')
+            
+            # Build descriptive filename
+            if start_date == end_date:
+                # Single day
+                parts = ['lake', lake_name, 'transect_timeseries', start_date]
+            else:
+                # Multiple days
+                parts = ['lake', lake_name, 'transect_timeseries', f'{start_date}_to_{end_date}']
+            
+            # Add time step info if specified
+            if time_step is not None:
+                if isinstance(time_step, str):
+                    parts.append(f'every_{time_step}')
+                elif isinstance(time_step, (int, float)):
+                    if time_step >= 1 and time_step == int(time_step) and time_step < 10:
+                        parts.append(f'step_{int(time_step)}')
+                    else:
+                        parts.append(f'every_{time_step:.0f}h')
+            
+            filename = '_'.join(parts) + f'.{format}'
+            
+            # Use 'figures' folder
+            save_dir = '../figures'
+            save_path = os.path.join(save_dir, filename)
+        
+        # Create directory if it doesn't exist
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            print(f"Created directory: {save_dir}")
+        
+        # Save the figure
+        fig.savefig(save_path, dpi=dpi, format=format, bbox_inches='tight')
+        print(f"✓ Figure saved to: {save_path}")
+        print(f"  - Format: {format.upper()}")
+        print(f"  - Resolution: {dpi} DPI")
+        print(f"  - Number of time steps: {n_times}")
+    
+    # Create animated GIF if requested
+    if save_gif:
+        print("\nCreating animated GIF...")
+        
+        # Generate automatic filename if gif_path not provided
+        if gif_path is None:
+            lake_name = lake
+            
+            # Get start and end times for filename
+            start_time_str = times_filtered[0].replace('Z', '+00:00')
+            end_time_str = times_filtered[-1].replace('Z', '+00:00')
+            
+            try:
+                start_dt = datetime.fromisoformat(start_time_str)
+                end_dt = datetime.fromisoformat(end_time_str)
+                start_date = start_dt.strftime('%Y-%m-%d')
+                end_date = end_dt.strftime('%Y-%m-%d')
+            except:
+                start_dt = datetime.strptime(start_time_str, '%Y-%m-%dT%H:%M:%S')
+                end_dt = datetime.strptime(end_time_str, '%Y-%m-%dT%H:%M:%S')
+                start_date = start_dt.strftime('%Y-%m-%d')
+                end_date = end_dt.strftime('%Y-%m-%d')
+            
+            # Build filename
+            if start_date == end_date:
+                parts = ['lake', lake_name, 'transect_animation', start_date]
+            else:
+                parts = ['lake', lake_name, 'transect_animation', f'{start_date}_to_{end_date}']
+            
+            # Add time step info
+            if time_step is not None:
+                if isinstance(time_step, str):
+                    parts.append(f'every_{time_step}')
+                elif isinstance(time_step, (int, float)):
+                    if time_step >= 1 and time_step == int(time_step) and time_step < 10:
+                        parts.append(f'step_{int(time_step)}')
+                    else:
+                        parts.append(f'every_{time_step:.0f}h')
+            
+            gif_filename = '_'.join(parts) + '.gif'
+            
+            save_dir = '../figures'
+            gif_path = os.path.join(save_dir, gif_filename)
+        
+        # Create directory if needed
+        gif_dir = os.path.dirname(gif_path)
+        if gif_dir and not os.path.exists(gif_dir):
+            os.makedirs(gif_dir)
+        
+        # Create individual frames for animation
+        frames = []
+        
+        # Calculate subsampling for velocity arrows (for GIF)
+        if plot_velocity:
+            skip_dist_gif = max(1, len(distance) // 20)
+            skip_depth_gif = max(1, len(depth) // 15)
+        
+        # Set figure size for GIF (typically smaller for file size)
+        gif_figsize = (12, 8)
+        
+        for frame_idx, time_idx in enumerate(time_indices):
+            # Create a new figure for each frame
+            fig_frame, ax_frame = plt.subplots(1, 1, figsize=gif_figsize)
+            
+            time_str = times_filtered[frame_idx]
+            
+            # Get 2D slice for this time
+            temp_2d = temp_3d[time_idx, :, :]
+            temp_masked = np.ma.masked_invalid(temp_2d)
+            
+            # Plot temperature
+            if plot_temp:
+                mesh_frame = ax_frame.pcolormesh(Distance/1000, Depth, temp_masked,
+                                               cmap=cmap, shading='auto',
+                                               vmin=temp_min, vmax=temp_max)
+            
+            # Plot velocity vectors
+            if plot_velocity:
+                u_2d = u_3d[time_idx, :, :]
+                v_2d = v_3d[time_idx, :, :]
+                
+                Distance_sub = Distance[::skip_depth_gif, ::skip_dist_gif]
+                Depth_sub = Depth[::skip_depth_gif, ::skip_dist_gif]
+                u_sub = u_2d[::skip_depth_gif, ::skip_dist_gif]
+                v_sub = v_2d[::skip_depth_gif, ::skip_dist_gif]
+                
+                vel_along = u_sub * np.cos(transect_angle) + v_sub * np.sin(transect_angle)
+                vel_vertical = np.zeros_like(vel_along)
+                
+                valid = ~(np.isnan(Distance_sub) | np.isnan(Depth_sub) |
+                         np.isnan(vel_along) | np.isnan(vel_vertical))
+                
+                ax_frame.quiver(Distance_sub[valid]/1000, Depth_sub[valid],
+                              vel_along[valid], vel_vertical[valid],
+                              scale=quiver_scale, width=quiver_width,
+                              color='black', alpha=alpha_quiver,
+                              headwidth=3, headlength=4)
+            
+            # Format time
+            try:
+                dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                time_formatted = dt.strftime('%Y-%m-%d %H:%M')
+            except:
+                time_formatted = time_str[:19]
+            
+            # Calculate elapsed time from start
+            if frame_idx > 0:
+                t0_str = times_filtered[0].replace('Z', '+00:00')
+                try:
+                    t0 = datetime.fromisoformat(t0_str)
+                    dt_current = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                except:
+                    t0 = datetime.strptime(t0_str, '%Y-%m-%dT%H:%M:%S')
+                    dt_current = datetime.strptime(time_str, '%Y-%m-%dT%H:%M:%S')
+                
+                elapsed_seconds = (dt_current - t0).total_seconds()
+                elapsed_hours = elapsed_seconds / 3600
+                
+                if elapsed_hours >= 24:
+                    elapsed_str = f" (+{elapsed_hours/24:.1f} days)"
+                else:
+                    elapsed_str = f" (+{elapsed_hours:.1f} hours)"
+            else:
+                elapsed_str = ""
+            
+            # Title
+            title_parts_frame = []
+            if plot_temp:
+                title_parts_frame.append('Temperature')
+            if plot_velocity:
+                title_parts_frame.append('Currents')
+            
+            ax_frame.set_title(f'Lake {lake.title()} Transect {" & ".join(title_parts_frame)}\n' +
+                             f'{time_formatted}{elapsed_str}\n' +
+                             f'Frame {frame_idx + 1}/{n_times}',
+                             fontsize=14, fontweight='bold', pad=10)
+            
+            ax_frame.set_xlabel('Distance (km)', fontsize=12)
+            ax_frame.set_ylabel('Depth (m)', fontsize=12)
+            ax_frame.grid(alpha=0.3, linestyle=':', linewidth=0.5)
+            ax_frame.axhline(y=0, color='darkblue', linestyle='--',
+                           linewidth=1, alpha=0.5)
+            
+            # Add colorbar
+            if plot_temp:
+                cbar_frame = plt.colorbar(mesh_frame, ax=ax_frame, pad=0.02)
+                cbar_frame.set_label('Temperature (°C)', fontsize=11, fontweight='bold')
+            
+            plt.tight_layout()
+            
+            # Save frame to buffer
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=gif_dpi, bbox_inches='tight')
+            buf.seek(0)
+            frames.append(Image.open(buf).copy())
+            buf.close()
+            
+            plt.close(fig_frame)
+            
+            # Progress indicator
+            if (frame_idx + 1) % 5 == 0 or frame_idx == n_times - 1:
+                print(f"  Processed frame {frame_idx + 1}/{n_times}")
+        
+        # Calculate duration per frame in milliseconds
+        duration_ms = int(1000 / gif_fps)
+        
+        # Save as GIF
+        frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=duration_ms,
+            loop=0,  # 0 = infinite loop
+            optimize=False  # Set to True for smaller file size but slower creation
+        )
+        
+        # Get file size
+        file_size_mb = os.path.getsize(gif_path) / (1024 * 1024)
+        
+        print(f"\n✓ Animated GIF saved to: {gif_path}")
+        print(f"  - Format: GIF")
+        print(f"  - Frames: {n_times}")
+        print(f"  - FPS: {gif_fps}")
+        print(f"  - Duration per frame: {duration_ms} ms")
+        print(f"  - Total duration: {duration_ms * n_times / 1000:.1f} seconds")
+        print(f"  - Resolution: {gif_dpi} DPI")
+        print(f"  - File size: {file_size_mb:.2f} MB")
     
     return fig, axes
 
